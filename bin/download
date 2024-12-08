@@ -7,7 +7,7 @@ plugin_dir=$(dirname "$(dirname "$current_script_path")")
 
 arch="amd64"
 case $(uname -m) in
-arm64) arch="arm64" ;;
+	arm64) arch="arm64" ;;
 esac
 
 # shellcheck source=../lib/utils.bash
@@ -17,31 +17,49 @@ platform=$(get_platform "$arch" "$ASDF_INSTALL_VERSION")
 
 mkdir -p "$ASDF_DOWNLOAD_PATH"
 
-release_file="$ASDF_DOWNLOAD_PATH/$TOOL_NAME-$ASDF_INSTALL_VERSION.zip"
+release_file="$ASDF_DOWNLOAD_PATH/$TOOL_NAME-$ASDF_INSTALL_VERSION"
 
-# Download zip file to the download directory
-download_release "$platform" "$arch" "$ASDF_INSTALL_VERSION" "$release_file"
-
-#  Extract contents of zip file into the download directory
-unzip -qq "$release_file" -d "$ASDF_DOWNLOAD_PATH" || fail "Could not extract $release_file"
+download_problem="Could not download ${release_file}.{zip,tar.gz,tar.bz2,tar.xz}"
+# Try to download zip file to the download directory
+if download_release "$platform" "$arch" "$ASDF_INSTALL_VERSION" "$release_file.zip"; then
+	unset download_problem
+	release_file="${release_file}.zip"
+	#  Extract contents of zip file into the download directory
+	unzip -qq "$release_file" -d "$ASDF_DOWNLOAD_PATH" || fail "Could not extract $release_file"
+else
+	# Try to download tar file to the download directory
+	for extension in "tar."{gz,bz2,xz}; do
+		if download_release "$platform" "$arch" "$ASDF_INSTALL_VERSION" "$release_file.$extension"; then
+			unset download_problem
+			release_file="${release_file}.${extension}"
+			#  Extract contents of tar file into the download directory
+			tar xf "$release_file" --directory="$ASDF_DOWNLOAD_PATH" || fail "Could not extract $release_file"
+			break
+		fi
+	done
+fi
+if [[ -n "$download_problem" ]]; then
+	fail "$download_problem"
+fi
 
 # Versions after dev-2023-02 are zipped up in the CI to keep executable permissions, and then zipped up again by GitHub.
 if [ -f "$ASDF_DOWNLOAD_PATH/dist.zip" ]; then
-  unzip -qq "$ASDF_DOWNLOAD_PATH/dist.zip" -d "$ASDF_DOWNLOAD_PATH" || fail "Could not extract $ASDF_DOWNLOAD_PATH/dist.zip"
-  rm "$ASDF_DOWNLOAD_PATH/dist.zip"
+	unzip -qq "$ASDF_DOWNLOAD_PATH/dist.zip" -d "$ASDF_DOWNLOAD_PATH" || fail "Could not extract $ASDF_DOWNLOAD_PATH/dist.zip"
+	rm "$ASDF_DOWNLOAD_PATH/dist.zip"
 fi
 for tarball in "$ASDF_DOWNLOAD_PATH/dist.tar."{gz,bz2,xz}; do
-  if [[ -f $tarball ]]; then
-    tar xf "$tarball" --directory="$ASDF_DOWNLOAD_PATH" || fail "Could not extract $tarball"
-    rm "$tarball"
-  fi
+	if [[ -f $tarball ]]; then
+		tar xf "$tarball" --directory="$ASDF_DOWNLOAD_PATH" || fail "Could not extract $tarball"
+		rm "$tarball"
+		break
+	fi
 done
 
 for nested_folder in "$ASDF_DOWNLOAD_PATH/$TOOL_NAME-$platform-"*; do
-  if [[ -d $nested_folder ]]; then
-    mv "$nested_folder"/* "$ASDF_DOWNLOAD_PATH" || fail "Could not move contents of $nested_folder"
-    rmdir "$nested_folder" || fail "Could not remove $nested_folder"
-  fi
+	if [[ -d $nested_folder ]]; then
+		mv "$nested_folder"/* "$ASDF_DOWNLOAD_PATH" || fail "Could not move contents of $nested_folder"
+		rmdir "$nested_folder" || fail "Could not remove $nested_folder"
+	fi
 done
 
 # Remove the zip file since we don't need to keep it
